@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>סימולטור פקח אוטובוסים בישראל 3D</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- FontAwesome 6 Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Google Fonts - Rubik -->
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+
+    <!-- Three.js 3D Engine -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <!-- Leaflet.js Interactive Map Engine -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        * {
+            font-family: 'Rubik', sans-serif;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body {
+            background-color: #f8fafc;
+            color: #0f172a;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+        }
+        #leaflet-map {
+            width: 100%;
+            height: 100%;
+            background: #e2e8f0;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+        /* Custom scrollbars */
+        ::-webkit-scrollbar {
+            height: 6px;
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(241, 245, 249, 0.8);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #a855f7;
+            border-radius: 4px;
+        }
+        /* Clean Crosshair (+) */
+        .reticle-cross {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 25;
+        }
+        /* Ensure Leaflet controls and markers stay below UI but above map tiles */
+        .leaflet-pane {
+            z-index: 5 !important;
+        }
+        .leaflet-top, .leaflet-bottom {
+            z-index: 10 !important;
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen w-screen overflow-hidden select-none bg-slate-50">
+
+    <!-- TOP HUD HEADER -->
+    <header class="absolute top-0 right-0 left-0 z-30 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-3 md:px-5 py-2.5 flex items-center justify-between shadow-sm">
+        <!-- Logo & Level Stats -->
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-purple-500/20 border border-purple-200">
+                <i class="fa-solid fa-bus text-lg"></i>
+            </div>
+            <div>
+                <h1 class="text-base md:text-lg font-black tracking-wide text-slate-800 flex items-center gap-2">
+                    סימולטור פקח 3D
+                    <span id="user-display-tag" class="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200">שלום, אורח</span>
+                </h1>
+                <p class="text-xs text-slate-500 font-medium flex items-center gap-2">
+                    <span id="current-bus-line-display" class="text-purple-700 font-bold">קו 1</span>
+                    <span class="text-slate-300">•</span>
+                    <span id="bus-progress-hud" class="text-amber-600 font-bold">אוטובוס 1/5</span>
+                </p>
+            </div>
+        </div>
+
+        <!-- Level Badge & Controls -->
+        <div class="flex items-center gap-2">
+            <!-- GPS Location Button -->
+            <button onclick="locateUserPosition()" title="אתר את המיקום שלי" class="px-2.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                <i class="fa-solid fa-location-crosshairs text-purple-600 text-sm"></i>
+                <span class="hidden sm:inline">GPS</span>
+            </button>
+
+            <!-- Level Selector Trigger Button -->
+            <button onclick="openLevelModal()" class="px-3 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+                <i class="fa-solid fa-trophy text-amber-500"></i>
+                <span>שלב <span id="hud-level-num" class="text-purple-950 font-extrabold">1</span>/100</span>
+            </button>
+
+            <!-- Money & Reputation Stats -->
+            <div class="hidden md:flex items-center gap-2 bg-slate-100 border border-slate-200 px-3 py-1 rounded-xl text-xs font-bold text-slate-700">
+                <span class="text-emerald-600 flex items-center gap-1">
+                    <i class="fa-solid fa-shekel-sign"></i>
+                    <span id="hud-money">0</span>
+                </span>
+                <span class="text-slate-300">|</span>
+                <span class="text-cyan-600 flex items-center gap-1">
+                    <i class="fa-solid fa-shield-halved"></i>
+                    <span id="hud-rep">100</span>%
+                </span>
+            </div>
+
+            <!-- View Switcher (Map <-> 3D) -->
+            <button id="btn-toggle-view" onclick="toggleViewMode()" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md transition flex items-center gap-1.5">
+                <i class="fa-solid fa-cube" id="view-mode-icon"></i>
+                <span id="view-mode-text">תצוגת 3D</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN CONTAINER -->
+    <main class="relative flex-1 w-full h-full overflow-hidden">
+
+        <!-- MAP VIEW -->
+        <div id="map-view-container" class="absolute inset-0 z-10 w-full h-full bg-slate-100">
+            <div id="leaflet-map" class="z-0"></div>
+
+            <!-- Map Line Quick Selector Bar (Fixed Above Map Layers) -->
+            <div class="absolute top-16 right-3 left-3 z-30 flex flex-col gap-1.5 bg-white/95 backdrop-blur-md p-2.5 rounded-2xl border border-slate-200 shadow-xl max-w-2xl mx-auto">
+                <div class="flex items-center justify-between text-xs font-bold text-slate-700">
+                    <span class="flex items-center gap-1 text-purple-700">
+                        <i class="fa-solid fa-route"></i> בחירת מסלול (<span id="line-count-display">1</span> קווים זמינים):
+                    </span>
+                    <input type="text" id="line-search-input" onkeyup="filterBusLines()" placeholder="חפש קו..." class="bg-slate-50 border border-slate-200 text-slate-800 px-2.5 py-1 rounded-xl text-xs w-28 focus:outline-none focus:border-purple-500">
+                </div>
+
+                <!-- Horizontal Scrollable Container for Line Buttons -->
+                <div id="lines-bar-container" class="flex items-center gap-2 overflow-x-auto py-1 px-0.5">
+                    <!-- Populated dynamically via JS -->
+                </div>
+            </div>
+
+            <!-- Direct 3D Jump Banner -->
+            <div id="level1-direct-3d-banner" class="absolute bottom-10 right-1/2 translate-x-1/2 z-30 bg-white/95 backdrop-blur-md border border-purple-300 p-3 rounded-2xl shadow-2xl flex items-center gap-3">
+                <div class="text-xs text-purple-900 font-bold">
+                    <span>כניסה ישירה לביקורת 3D באוטובוס הנוכחי!</span>
+                </div>
+                <button onclick="startDirectInspectionLevel1()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-xs shadow-md transition whitespace-nowrap active:scale-95">
+                    <i class="fa-solid fa-play ml-1"></i> כנס ל-3D עכשיו
+                </button>
+            </div>
+        </div>
+
+        <!-- 3D BUS INTERIOR VIEW CONTAINER -->
+        <div id="three-view-container" class="hidden absolute inset-0 z-10 w-full h-full bg-slate-900">
+            <canvas id="three-canvas" class="w-full h-full"></canvas>
+
+            <!-- Clean Green/White Crosshair (+) -->
+            <div class="reticle-cross flex items-center justify-center">
+                <div class="text-emerald-400 font-bold text-3xl drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]">+</div>
+            </div>
+
+            <!-- TARGETED PASSENGER FLOATING INFO CARD -->
+            <div id="target-prompt" class="hidden absolute top-20 right-1/2 translate-x-1/2 z-20 bg-white/95 backdrop-blur-md border border-purple-200 px-4 py-3 rounded-2xl shadow-2xl text-center max-w-sm w-full mx-3">
+                <div class="text-xs font-black text-purple-800 mb-1 flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-user-check text-purple-600"></i>
+                    <span id="pos-passenger-name">שם הנוסע</span>
+                </div>
+                <p id="pos-status-desc" class="text-[11px] text-slate-600 mb-1">ממתין לבדיקת רב-קו / כרטיס</p>
+            </div>
+
+            <!-- SMALL PASSENGER SCAN BUTTON - BOTTOM LEFT -->
+            <div class="absolute bottom-6 left-6 z-30">
+                <button onclick="triggerPassengerScan()" class="px-3.5 py-2.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-xl border border-emerald-400 backdrop-blur-md flex items-center gap-2 transition active:scale-95">
+                    <i class="fa-solid fa-barcode text-sm"></i>
+                    <span>בדוק נוסע (רב-קו)</span>
+                </button>
+            </div>
+
+            <!-- WALKING CONTROLS FOR MOBILE & DESKTOP - BOTTOM RIGHT -->
+            <div class="absolute bottom-6 right-6 z-30 flex items-center gap-2">
+                <button id="btn-walk-fwd" class="w-12 h-12 rounded-2xl bg-white/90 hover:bg-white text-slate-800 border border-slate-300 shadow-lg flex items-center justify-center text-lg active:scale-95 transition">
+                    <i class="fa-solid fa-arrow-up"></i>
+                </button>
+                <button id="btn-walk-bwd" class="w-12 h-12 rounded-2xl bg-white/90 hover:bg-white text-slate-800 border border-slate-300 shadow-lg flex items-center justify-center text-lg active:scale-95 transition">
+                    <i class="fa-solid fa-arrow-down"></i>
+                </button>
+            </div>
+
+            <!-- BUS MODEL BADGE DISPLAY -->
+            <div class="absolute top-20 right-6 z-20 bg-purple-900/80 text-white px-3 py-1.5 rounded-xl border border-purple-400 text-xs font-bold backdrop-blur-md">
+                <span id="bus-model-label">אוטובוס רגיל (קומה 1)</span>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- FOOTER SMALL FEEDBACK & LOGIN TRIGGER -->
+    <footer class="absolute bottom-1 right-2 left-2 z-30 text-center pointer-events-auto">
+        <button onclick="openFeedbackModal()" class="text-[10px] text-slate-400 hover:text-purple-600 transition underline bg-white/70 px-2 py-0.5 rounded-full border border-slate-200">
+            פניות ודיווח
+        </button>
+    </footer>
+
+    <!-- MODAL 0: LOGIN & REGISTER MODAL -->
+    <div id="modal-auth" class="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-white border border-purple-200 rounded-3xl p-6 max-w-sm w-full shadow-2xl text-right">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-500 text-white flex items-center justify-center text-2xl mx-auto mb-3 shadow-md">
+                <i class="fa-solid fa-user-shield"></i>
+            </div>
+            <h2 class="text-base font-black text-center text-slate-800 mb-1">כניסה / הרשמה למשחק</h2>
+            <p class="text-xs text-center text-slate-500 mb-4">הכנס שם וסיסמה לשמירת הנקודות וההתקדמות שלך</p>
+
+            <form onsubmit="handleUserAuth(event)" class="space-y-3 text-xs">
+                <div>
+                    <label class="block text-slate-700 font-bold mb-1">שם שחקן / פקח:</label>
+                    <input type="text" id="auth-username" required placeholder="הכנס שם..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-purple-500">
+                </div>
+                <div>
+                    <label class="block text-slate-700 font-bold mb-1">סיסמה:</label>
+                    <input type="password" id="auth-password" required placeholder="הכנס סיסמה..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-purple-500">
+                </div>
+                <button type="submit" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md transition">
+                    התחל משחק
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL 1: NFC & RAV-KAV SCANNER TERMINAL -->
+    <div id="modal-scanner" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white border border-purple-200 rounded-3xl p-5 max-w-md w-full shadow-2xl text-right">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-3">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-mobile-screen-button text-purple-600"></i> מכשיר בדיקת רב-קו / אפליקציה
+                </h3>
+                <button onclick="closeScannerModal()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 flex items-center justify-center">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="bg-slate-900 text-white p-3.5 rounded-2xl mb-4 font-mono text-xs shadow-inner space-y-2">
+                <div class="flex items-center justify-between text-slate-400 border-b border-slate-800 pb-1.5">
+                    <span>נוסע נבדק:</span>
+                    <span id="modal-pass-name" class="text-purple-400 font-bold">ישראל ישראלי</span>
+                </div>
+                <div class="text-slate-300 italic" id="modal-pass-excuse">
+                    "עברתי מאוטובוס אחר..."
+                </div>
+                <div id="modal-terminal-log" class="text-[11px] text-slate-300 space-y-1">
+                    <p class="text-slate-400">> לחץ על כפתור הסריקה למטה לבדיקת כרטיס...</p>
+                </div>
+            </div>
+
+            <!-- Action Buttons Inside Scanner -->
+            <div class="space-y-2 mb-4">
+                <button onclick="performScanProcess()" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md transition flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-wifi"></i> בצע סריקת NFC / העברת רב-קו
+                </button>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="askPassenger('station')" class="py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-[11px] transition">
+                        <i class="fa-solid fa-circle-question text-purple-600 ml-1"></i> שאל: באיזו תחנה עלית?
+                    </button>
+                    <button onclick="askPassenger('transfer')" class="py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-[11px] transition">
+                        <i class="fa-solid fa-clock-rotate-left text-purple-600 ml-1"></i> שאל לגבי מעבר 90 דק'
+                    </button>
+                </div>
+            </div>
+
+            <div class="border-t border-slate-100 pt-3 flex items-center justify-between text-xs font-bold">
+                <span id="modal-scan-status-badge" class="text-slate-500">טרם נסרק</span>
+                <div class="flex items-center gap-1.5">
+                    <button onclick="resolveInspection('approve')" class="px-3 py-1.5 rounded-xl bg-emerald-100 hover:bg-emerald-200 text-emerald-700 transition">
+                        הכל תקין ✓
+                    </button>
+                    <button onclick="resolveInspection('warn')" class="px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-700 transition">
+                        אזהרה
+                    </button>
+                    <button onclick="resolveInspection('fine')" class="px-3 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-700 transition">
+                        תן דו"ח ₪250 ✗
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 2: LEVEL SELECTOR MODAL (1 to 100) -->
+    <div id="modal-levels" class="hidden fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white border border-purple-200 rounded-3xl p-5 max-w-xl w-full shadow-2xl text-right flex flex-col max-h-[85vh]">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-3">
+                <h3 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-trophy text-amber-500"></i> בחירת שלב במשחק (1-100)
+                </h3>
+                <button onclick="closeLevelModal()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 flex items-center justify-center">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <p class="text-xs text-slate-500 mb-3">
+                מספר השלב קובע בדיוק את כמות הקווים המופיעים על המפה (למשל: בשלב 7 יהיו 7 קווים, ובשלב 20 יהיו 20 קווים ואוטובוס קומתיים!).
+            </p>
+
+            <div id="levels-grid" class="grid grid-cols-4 sm:grid-cols-6 gap-2 overflow-y-auto p-1 flex-1">
+                <!-- Dynamically populated 100 level buttons -->
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 3: FEEDBACK / SECRET ADMIN TRIGGER -->
+    <div id="modal-feedback" class="hidden fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white border border-purple-200 rounded-3xl p-5 max-w-md w-full shadow-2xl text-right">
+            <div class="flex items-center justify-between border-b border-slate-100 pb-3 mb-3">
+                <h3 class="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-envelope-open-text text-purple-600"></i> פניות ודיווח על תקלות
+                </h3>
+                <button onclick="closeFeedbackModal()" class="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 flex items-center justify-center">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <form onsubmit="submitFeedback(event)" class="space-y-3 text-xs">
+                <div>
+                    <label class="block text-slate-700 font-bold mb-1">דוא"ל / קוד:</label>
+                    <input type="text" id="fb-email" placeholder="הכנס מייל לשורת הפניות..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-purple-500">
+                </div>
+                <div>
+                    <label class="block text-slate-700 font-bold mb-1">נושא ההודעה:</label>
+                    <input type="text" id="fb-subject" placeholder="דיווח על תקלה / הצעה..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-purple-500">
+                </div>
+                <div>
+                    <label class="block text-slate-700 font-bold mb-1">תוכן ההודעה:</label>
+                    <textarea id="fb-body" rows="3" placeholder="תארו כאן את פנייתכם..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-purple-500 resize-none"></textarea>
+                </div>
+                <button type="submit" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs shadow-md transition">
+                    <i class="fa-solid fa-paper-plane ml-1"></i> שלח פנייה
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL 5: CUSTOM ALERT MODAL -->
+    <div id="modal-alert" class="hidden fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white border border-purple-200 rounded-3xl p-5 max-w-sm w-full shadow-2xl text-center">
+            <div class="w-12 h-12 rounded-2xl bg-purple-100 border border-purple-200 text-amber-500 flex items-center justify-center text-2xl mx-auto mb-3">
+                <i class="fa-solid fa-bell" id="custom-alert-icon"></i>
+            </div>
+            <h3 id="custom-alert-title" class="text-base font-bold text-slate-800 mb-2">הודעת מערכת</h3>
+            <p id="custom-alert-msg" class="text-xs text-slate-600 mb-4 leading-relaxed">תוכן ההודעה...</p>
+            <button onclick="closeCustomAlert()" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-xs transition">
+                אישור
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL 6: ADMIN CONTROL PANEL (TRIGGERED BY SECRET CODE '2014') -->
+    <div id="modal-admin-panel" class="hidden fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 text-white rounded-3xl p-5 max-w-2xl w-full shadow-2xl text-right flex flex-col max-h-[90vh]">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+                <div class="flex items-center gap-2">
+                    <div class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center text-lg font-black">
+                        <i class="fa-solid fa-user-shield"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-black text-emerald-400">פנל ניהול ועריכת המשחק בלייב</h3>
+                        <p class="text-[11px] text-slate-400">גישה מורשית אומתה - ניתן לשנות את כל חוקי המשחק</p>
+                    </div>
+                </div>
+                <button onclick="closeAdminPanel()" class="w-8 h-8 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4 overflow-y-auto pr-1 text-xs">
+                <!-- Quick Game Editor -->
+                <div class="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+                    <h4 class="font-bold text-purple-400 mb-2 flex items-center gap-1.5">
+                        <i class="fa-solid fa-sliders"></i> עריכה מלאה של הפרמטרים
+                    </h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                        <div>
+                            <label class="block text-slate-400 mb-1">שנה שלב (1-100):</label>
+                            <input type="number" id="admin-set-level" value="1" min="1" max="100" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-emerald-400 font-bold focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 mb-1">עדכן כסף (₪):</label>
+                            <input type="number" id="admin-set-money" value="1000" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-emerald-400 font-bold focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 mb-1">מוניטין (%):</label>
+                            <input type="number" id="admin-set-rep" value="100" min="0" max="100" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-emerald-400 font-bold focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 mb-1">סוג אוטובוס:</label>
+                            <select id="admin-set-bus-type" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-2 text-emerald-400 font-bold focus:outline-none">
+                                <option value="auto">אוטומטי לפי שלב</option>
+                                <option value="single">אוטובוס רגיל</option>
+                                <option value="double">אוטובוס קומתיים</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button onclick="applyAdminStats()" class="mt-3 w-full py-2 bg-emerald-600 hover:bg-emerald-500 font-bold text-white rounded-xl shadow transition">
+                        <i class="fa-solid fa-check-double ml-1"></i> החל שינויים על המשחק עכשיו
+                    </button>
+                </div>
+
+                <!-- Active Players Registered -->
+                <div class="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+                    <h4 class="font-bold text-indigo-400 mb-2 flex items-center gap-1.5">
+                        <i class="fa-solid fa-users text-indigo-400"></i> שחקנים רשומים במערכת
+                    </h4>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-right text-slate-300">
+                            <thead>
+                                <tr class="text-slate-500 border-b border-slate-700 text-[10px]">
+                                    <th class="pb-1">שם שחקן</th>
+                                    <th class="pb-1">שלב</th>
+                                    <th class="pb-1">קופה</th>
+                                    <th class="pb-1">מוניטין</th>
+                                    <th class="pb-1">סטטוס</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-players-table" class="divide-y divide-slate-700/50">
+                                <!-- Dynamically populated -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // GLOBAL GAME STATE
+        let currentUser = null;
+        let registeredUsers = JSON.parse(localStorage.getItem('bus_game_users') || '{}');
+
+        let currentLevel = 1;
+        let busInCurrentLevel = 1;
+        let totalMoney = 0;
+        let playerReputation = 100;
+        let isMuted = false;
+        let currentView = 'map';
+        let currentLine = 'line_1';
+        let userGpsLocation = null;
+        let isDoubleDeckerBus = false;
+
+        // Preset Base Locations for generating non-overlapping visible routes
+        const BASE_MAP_STATIONS = [
+            [32.178, 34.871], [32.185, 34.882], [32.192, 34.895],
+            [32.055, 34.775], [32.076, 34.774], [32.083, 34.781],
+            [31.890, 34.980], [31.789, 35.204], [31.894, 34.811]
+        ];
+
+        function handleUserAuth(e) {
+            e.preventDefault();
+            const username = document.getElementById('auth-username').value.trim();
+            const pass = document.getElementById('auth-password').value.trim();
+
+            if (!username || !pass) return;
+
+            if (!registeredUsers[username]) {
+                registeredUsers[username] = {
+                    password: pass,
+                    level: 1,
+                    money: 0,
+                    rep: 100
+                };
+            } else {
+                if (registeredUsers[username].password !== pass) {
+                    customAlert('סיסמה שגויה עבור משתמש זה', 'שגיאת התחברות', 'fa-triangle-exclamation');
+                    return;
+                }
+            }
+
+            currentUser = username;
+            localStorage.setItem('bus_game_users', JSON.stringify(registeredUsers));
+
+            // Load Saved Progress
+            const userData = registeredUsers[username];
+            currentLevel = userData.level || 1;
+            totalMoney = userData.money || 0;
+            playerReputation = userData.rep || 100;
+
+            if (currentLevel >= 20) {
+                isDoubleDeckerBus = true;
+            } else {
+                isDoubleDeckerBus = false;
+            }
+
+            document.getElementById('modal-auth').classList.add('hidden');
+            document.getElementById('user-display-tag').textContent = `${username}`;
+
+            updateHUD();
+            initAudio();
+            initMap();
+            renderMapLinesForLevel();
+            playSound('success');
+        }
+
+        function saveCurrentProgress() {
+            if (currentUser && registeredUsers[currentUser]) {
+                registeredUsers[currentUser].level = currentLevel;
+                registeredUsers[currentUser].money = totalMoney;
+                registeredUsers[currentUser].rep = playerReputation;
+                localStorage.setItem('bus_game_users', JSON.stringify(registeredUsers));
+            }
+        }
+
+        function getAvailableLinesForLevel(level) {
+            // בדיוק כמות קווים השווה למספר השלב! (שלב 7 -> 7 קווים, שלב 20 -> 20 קווים)
+            const count = Math.min(100, Math.max(1, level));
+            const lines = [];
+
+            const baseLat = userGpsLocation ? userGpsLocation.lat : 32.178;
+            const baseLng = userGpsLocation ? userGpsLocation.lng : 34.871;
+
+            const operators = ["מטרופולין", "דן", "אגד", "אלקטרה אפיקים", "קווים", "סופרבוס"];
+
+            for (let i = 1; i <= count; i++) {
+                const op = operators[i % operators.length];
+                const isDD = level >= 20;
+
+                // Spread routes evenly around map so all 20 lines are clearly visible on top layer
+                const angle = (i / count) * Math.PI * 2;
+                const offsetLat = Math.sin(angle) * 0.025 + (i * 0.002);
+                const offsetLng = Math.cos(angle) * 0.025 + (i * 0.002);
+
+                const startLat = baseLat + offsetLat;
+                const startLng = baseLng + offsetLng;
+
+                lines.push({
+                    id: `line_${i}`,
+                    name: `קו ${i * 4 + 1}`,
+                    operator: op,
+                    fullName: `קו ${i * 4 + 1} (${op})${isDD ? ' 🚌 (קומתיים)' : ''}`,
+                    isDoubleDecker: isDD,
+                    coords: [
+                        [startLat, startLng],
+                        [startLat + 0.008, startLng + 0.006],
+                        [startLat + 0.015, startLng + 0.012]
+                    ]
+                });
+            }
+            return lines;
+        }
+
+        // MAP LOGIC
+        let map = null;
+        let activePolylines = [];
+        let activeMarkers = [];
+
+        function initMap() {
+            if (map) return;
+            const mapContainer = document.getElementById('leaflet-map');
+            if (!mapContainer) return;
+
+            map = L.map('leaflet-map').setView([32.178, 34.871], 12);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap'
+            }).addTo(map);
+
+            renderMapLinesForLevel();
+        }
+
+        function renderMapLinesForLevel() {
+            if (!map) return;
+
+            // Clear old layers
+            activePolylines.forEach(p => map.removeLayer(p));
+            activeMarkers.forEach(m => map.removeLayer(m));
+            activePolylines = [];
+            activeMarkers = [];
+
+            const availableLines = getAvailableLinesForLevel(currentLevel);
+            const container = document.getElementById('lines-bar-container');
+            const countDisplay = document.getElementById('line-count-display');
+
+            if (countDisplay) countDisplay.textContent = availableLines.length;
+
+            if (container) {
+                container.innerHTML = '';
+                availableLines.forEach(line => {
+                    const btn = document.createElement('button');
+                    const isSelected = line.id === currentLine;
+                    btn.className = `line-btn px-3 py-1.5 rounded-xl text-xs font-bold border transition whitespace-nowrap shadow-sm flex items-center gap-1 ${
+                        isSelected 
+                        ? 'bg-purple-600 text-white border-purple-400' 
+                        : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                    }`;
+                    btn.innerHTML = `<i class="fa-solid fa-bus text-[10px]"></i> ${line.fullName}`;
+                    btn.onclick = () => selectBusLine(line.id);
+                    container.appendChild(btn);
+                });
+            }
+
+            if (!availableLines.some(l => l.id === currentLine)) {
+                currentLine = availableLines[0]?.id || 'line_1';
+            }
+
+            // Draw ALL lines on map on top z-index layer
+            const bounds = [];
+            availableLines.forEach(line => {
+                const isSelected = line.id === currentLine;
+                const poly = L.polyline(line.coords, {
+                    color: isSelected ? '#a855f7' : '#64748b',
+                    weight: isSelected ? 6 : 4,
+                    opacity: isSelected ? 0.95 : 0.65,
+                    zIndexOffset: isSelected ? 1000 : 500
+                }).addTo(map);
+                activePolylines.push(poly);
+
+                line.coords.forEach(c => bounds.push(c));
+
+                // Add Bus Marker on mid point
+                const mid = line.coords[1];
+                const busIcon = L.divIcon({
+                    html: `<div style="background:${isSelected ? '#9333ea' : '#475569'}; color:white; width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2px solid white; box-shadow:0 0 10px rgba(0,0,0,0.3); font-size:12px;"><i class="fa-solid fa-bus"></i></div>`,
+                    className: '',
+                    iconSize: [30, 30]
+                });
+
+                const marker = L.marker(mid, { icon: busIcon, zIndexOffset: isSelected ? 1000 : 500 }).addTo(map);
+                marker.bindPopup(`<b>${line.fullName}</b><br><button onclick="switchViewMode('3d')" class="mt-2 w-full px-3 py-1 bg-purple-600 text-white rounded-lg text-xs font-bold shadow-md">כנס ל-3D באוטובוס זה</button>`);
+                activeMarkers.push(marker);
+            });
+
+            if (bounds.length > 0) {
+                map.fitBounds(bounds, { padding: [30, 30] });
+            }
+
+            const currentObj = availableLines.find(l => l.id === currentLine);
+            if (currentObj) {
+                const disp = document.getElementById('current-bus-line-display');
+                if (disp) disp.textContent = currentObj.fullName;
+            }
+        }
+
+        function selectBusLine(lineId) {
+            currentLine = lineId;
+            renderMapLinesForLevel();
+            playScanBeep();
+        }
+
+        function filterBusLines() {
+            const input = document.getElementById('line-search-input');
+            if (!input) return;
+            const val = input.value.toLowerCase();
+            const btns = document.querySelectorAll('.line-btn');
+            btns.forEach(btn => {
+                if (btn.textContent.toLowerCase().includes(val)) {
+                    btn.style.display = 'inline-flex';
+                } else {
+                    btn.style.display = 'none';
+                }
+            });
+        }
+
+        function locateUserPosition() {
+            if (!navigator.geolocation) {
+                customAlert('דפדפן זה אינו תומך בזיהוי מיקום GPS', 'שגיאת מיקום', 'fa-triangle-exclamation');
+                return;
+            }
+
+            navigator.geolocation.getCurrentPosition(pos => {
+                userGpsLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                if (!map) initMap();
+                map.flyTo([userGpsLocation.lat, userGpsLocation.lng], 14);
+                renderMapLinesForLevel();
+                playSound('success');
+                customAlert('הקווים עודכנו סביב המיקום שלך!', 'GPS פעיל', 'fa-location-dot');
+            }, () => {
+                customAlert('לא ניתן לקבל מיקום GPS', 'מיקום לא זמין', 'fa-location-dot');
+            });
+        }
+
+        function startDirectInspectionLevel1() {
+            switchViewMode('3d');
+        }
+
+        // THREE.JS 3D ENGINE
+        let scene, camera, renderer;
+        let passengers = [];
+        let sceneryObjects = [];
+        let targetedPassenger = null;
+        let cameraRotation = { x: 0, y: 0 };
+        let playerZPosition = 3;
+
+        function init3D() {
+            const canvas = document.getElementById('three-canvas');
+            if (!canvas) return;
+
+            if (renderer) {
+                onWindowResize();
+                return;
+            }
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xe2e8f0);
+
+            camera = new THREE.PerspectiveCamera(75, canvas.clientWidth / canvas.clientHeight, 0.1, 1000);
+            camera.position.set(0, 1.4, playerZPosition);
+
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+            buildIsraeliBusInterior();
+            buildPassingCityScenery();
+            spawnPassengers();
+            setupCameraDragControls();
+            setupWalkingControls();
+
+            window.addEventListener('resize', onWindowResize);
+            animate3D();
+        }
+
+        function buildIsraeliBusInterior() {
+            while(scene.children.length > 0){ 
+                scene.remove(scene.children[0]); 
+            }
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
+            scene.add(ambientLight);
+            const sunLight = new THREE.DirectionalLight(0xfffbeb, 0.85);
+            sunLight.position.set(5, 12, 5);
+            scene.add(sunLight);
+
+            const busHeight = isDoubleDeckerBus ? 4.2 : 2.4;
+
+            // Bus Floor
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 14), new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.8 }));
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // Roof
+            const roof = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 14), new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.9 }));
+            roof.position.y = busHeight;
+            roof.rotation.x = Math.PI / 2;
+            scene.add(roof);
+
+            // Double Decker Mid Floor
+            if (isDoubleDeckerBus) {
+                const midFloor = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 14), new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.7 }));
+                midFloor.position.y = 2.1;
+                midFloor.rotation.x = -Math.PI / 2;
+                scene.add(midFloor);
+
+                const stairs = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.1, 1.2), new THREE.MeshStandardMaterial({ color: 0x334155 }));
+                stairs.position.set(0.8, 1.05, -3);
+                scene.add(stairs);
+            }
+
+            // LED Panel Strip
+            const ledStrip = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 14), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+            ledStrip.position.set(0, busHeight - 0.01, 0);
+            ledStrip.rotation.x = Math.PI / 2;
+            scene.add(ledStrip);
+
+            // Walls & Windows
+            const lowerWallMat = new THREE.MeshStandardMaterial({ color: 0xcbd5e1, roughness: 0.5 });
+            const windowMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, transparent: true, opacity: 0.35, roughness: 0.1 });
+
+            const wallL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.9, 14), lowerWallMat);
+            wallL.position.set(-1.28, 0.45, 0);
+            scene.add(wallL);
+
+            const wallR = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.9, 14), lowerWallMat);
+            wallR.position.set(1.28, 0.45, 0);
+            scene.add(wallR);
+
+            const winL = new THREE.Mesh(new THREE.BoxGeometry(0.02, busHeight - 0.92, 14), windowMat);
+            winL.position.set(-1.28, (busHeight + 0.9) / 2, 0);
+            scene.add(winL);
+
+            const winR = new THREE.Mesh(new THREE.BoxGeometry(0.02, busHeight - 0.92, 14), windowMat);
+            winR.position.set(1.28, (busHeight + 0.9) / 2, 0);
+            scene.add(winR);
+
+            // Seats
+            const cushionGeo = new THREE.BoxGeometry(0.55, 0.18, 0.55);
+            const backrestGeo = new THREE.BoxGeometry(0.55, 0.65, 0.08);
+            const seatMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.5 });
+
+            for (let z = -5; z <= 4; z += 1.3) {
+                const sL = new THREE.Mesh(cushionGeo, seatMat);
+                sL.position.set(-0.85, 0.4, z);
+                scene.add(sL);
+                const bL = new THREE.Mesh(backrestGeo, seatMat);
+                bL.position.set(-0.85, 0.75, z - 0.22);
+                scene.add(bL);
+
+                const sR = new THREE.Mesh(cushionGeo, seatMat);
+                sR.position.set(0.85, 0.4, z);
+                scene.add(sR);
+                const bR = new THREE.Mesh(backrestGeo, seatMat);
+                bR.position.set(0.85, 0.75, z - 0.22);
+                scene.add(bR);
+            }
+
+            if (isDoubleDeckerBus) {
+                for (let z = -5; z <= 4; z += 1.3) {
+                    const sL2 = new THREE.Mesh(cushionGeo, seatMat);
+                    sL2.position.set(-0.85, 2.5, z);
+                    scene.add(sL2);
+                    const sR2 = new THREE.Mesh(cushionGeo, seatMat);
+                    sR2.position.set(0.85, 2.5, z);
+                    scene.add(sR2);
+                }
+            }
+
+            // Grab Poles
+            const poleMat = new THREE.MeshStandardMaterial({ color: 0xeab308, roughness: 0.3 });
+            for (let z = -4.5; z <= 4.5; z += 2.2) {
+                const pL = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, busHeight), poleMat);
+                pL.position.set(-0.48, busHeight / 2, z);
+                scene.add(pL);
+
+                const pR = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, busHeight), poleMat);
+                pR.position.set(0.48, busHeight / 2, z);
+                scene.add(pR);
+            }
+        }
+
+        function buildPassingCityScenery() {
+            sceneryObjects = [];
+            const roadMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.9 });
+            const road = new THREE.Mesh(new THREE.PlaneGeometry(30, 120), roadMat);
+            road.position.set(0, -0.5, 0);
+            road.rotation.x = -Math.PI / 2;
+            scene.add(road);
+
+            const colors = [0xf87171, 0x60a5fa, 0x34d399, 0xfbbf24, 0xa7f3d0];
+            for (let z = -50; z <= 50; z += 12) {
+                const bWidth = 5 + Math.random() * 3;
+                const bHeight = 6 + Math.random() * 8;
+                const bMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(bWidth, bHeight, 9),
+                    new THREE.MeshStandardMaterial({ color: colors[Math.floor(Math.random() * colors.length)], roughness: 0.7 })
+                );
+                bMesh.position.set(-8 - bWidth / 2, bHeight / 2 - 0.5, z);
+                scene.add(bMesh);
+                sceneryObjects.push(bMesh);
+            }
+        }
+
+        function spawnPassengers() {
+            passengers.forEach(p => { if (p.mesh) scene.remove(p.mesh); });
+            passengers = [];
+
+            const NAMES = ["משה לוי", "נועה כהן", "דוד אברהם", "שירה חדד", "אורן מזרחי", "יעל גבאי", "עומר שפירא"];
+            const EXCUSES = [
+                "העברתי את כרטיס הרב-קו בכניסה",
+                "עברתי מאוטובוס קודם תוך 90 דקות",
+                "שילמתי באפליקציית מוביט בטלפון",
+                "סרקתי קוד QR באפליקציה",
+                "יש לי חופשי-חודשי ארצי"
+            ];
+
+            const availableSeats = [];
+            for (let z = -5; z <= 4; z += 1.3) {
+                availableSeats.push({ side: -0.85, y: 0.48, z });
+                availableSeats.push({ side: 0.85, y: 0.48, z });
+            }
+            if (isDoubleDeckerBus) {
+                for (let z = -5; z <= 4; z += 1.3) {
+                    availableSeats.push({ side: -0.85, y: 2.58, z });
+                    availableSeats.push({ side: 0.85, y: 2.58, z });
+                }
+            }
+
+            availableSeats.sort(() => Math.random() - 0.5);
+            const count = Math.min(availableSeats.length, isDoubleDeckerBus ? 10 : 6);
+
+            for (let i = 0; i < count; i++) {
+                const seat = availableSeats[i];
+                const isValid = Math.random() > 0.4;
+
+                const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 16), new THREE.MeshStandardMaterial({ color: 0xfbcfe8 }));
+                head.position.y = 0.52;
+
+                const shirt = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.2, 0.42, 16), new THREE.MeshStandardMaterial({ color: 0x0284c7 }));
+                shirt.position.y = 0.22;
+
+                const group = new THREE.Group();
+                group.add(head);
+                group.add(shirt);
+                group.position.set(seat.side, seat.y, seat.z);
+                scene.add(group);
+
+                passengers.push({
+                    mesh: group,
+                    isValidTicket: isValid,
+                    name: NAMES[Math.floor(Math.random() * NAMES.length)],
+                    excuse: EXCUSES[Math.floor(Math.random() * EXCUSES.length)],
+                    inspected: false
+                });
+            }
+        }
+
+        function setupCameraDragControls() {
+            let isDragging = false;
+            let previousTouch = { x: 0, y: 0 };
+            const container = document.getElementById('three-view-container');
+            if (!container) return;
+
+            const onStart = (x, y) => { isDragging = true; previousTouch = { x, y }; };
+            const onMove = (x, y) => {
+                if (!isDragging) return;
+                const deltaX = x - previousTouch.x;
+                const deltaY = y - previousTouch.y;
+
+                cameraRotation.y -= deltaX * 0.005;
+                cameraRotation.x -= deltaY * 0.005;
+                cameraRotation.x = Math.max(-Math.PI / 3, Math.min(Math.PI / 3, cameraRotation.x));
+
+                camera.rotation.set(0, 0, 0);
+                camera.rotateY(cameraRotation.y);
+                camera.rotateX(cameraRotation.x);
+                previousTouch = { x, y };
+            };
+            const onEnd = () => { isDragging = false; };
+
+            container.addEventListener('mousedown', e => onStart(e.clientX, e.clientY));
+            window.addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
+            window.addEventListener('mouseup', onEnd);
+
+            container.addEventListener('touchstart', e => { if (e.touches.length === 1) onStart(e.touches[0].clientX, e.touches[0].clientY); });
+            window.addEventListener('touchmove', e => { if (e.touches.length === 1) onMove(e.touches[0].clientX, e.touches[0].clientY); });
+            window.addEventListener('touchend', onEnd);
+        }
+
+        function setupWalkingControls() {
+            const btnFwd = document.getElementById('btn-walk-fwd');
+            const btnBwd = document.getElementById('btn-walk-bwd');
+            let walkInterval = null;
+
+            const startWalk = (dir) => {
+                if (walkInterval) clearInterval(walkInterval);
+                walkInterval = setInterval(() => {
+                    playerZPosition += dir * 0.15;
+                    playerZPosition = Math.max(-5.5, Math.min(5, playerZPosition));
+                    camera.position.z = playerZPosition;
+                }, 30);
+            };
+
+            const stopWalk = () => { if (walkInterval) { clearInterval(walkInterval); walkInterval = null; } };
+
+            if (btnFwd) {
+                btnFwd.addEventListener('mousedown', () => startWalk(-1));
+                btnFwd.addEventListener('mouseup', stopWalk);
+                btnFwd.addEventListener('touchstart', (e) => { e.preventDefault(); startWalk(-1); });
+                btnFwd.addEventListener('touchend', stopWalk);
+            }
+            if (btnBwd) {
+                btnBwd.addEventListener('mousedown', () => startWalk(1));
+                btnBwd.addEventListener('mouseup', stopWalk);
+                btnBwd.addEventListener('touchstart', (e) => { e.preventDefault(); startWalk(1); });
+                btnBwd.addEventListener('touchend', stopWalk);
+            }
+        }
+
+        function checkTargeting() {
+            if (!camera || !scene) return;
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+            let closestDist = Infinity;
+            targetedPassenger = null;
+
+            passengers.forEach(p => {
+                if (p.inspected || !p.mesh || !p.mesh.visible) return;
+                const intersects = raycaster.intersectObject(p.mesh, true);
+                if (intersects.length > 0) {
+                    const dist = intersects[0].distance;
+                    if (dist < 3.8 && dist < closestDist) {
+                        closestDist = dist;
+                        targetedPassenger = p;
+                    }
+                }
+            });
+
+            const nameEl = document.getElementById('pos-passenger-name');
+            const statusEl = document.getElementById('pos-status-desc');
+            const promptEl = document.getElementById('target-prompt');
+
+            if (targetedPassenger) {
+                if (nameEl) nameEl.textContent = targetedPassenger.name;
+                if (statusEl) statusEl.textContent = targetedPassenger.excuse;
+                if (promptEl) promptEl.classList.remove('hidden');
+            } else {
+                if (nameEl) nameEl.textContent = 'כוון על נוסע לבדיקה';
+                if (statusEl) statusEl.textContent = '';
+                if (promptEl) promptEl.classList.add('hidden');
+            }
+        }
+
+        function animate3D() {
+            requestAnimationFrame(animate3D);
+
+            sceneryObjects.forEach(obj => {
+                obj.position.z += 0.25;
+                if (obj.position.z > 25) obj.position.z -= 100;
+            });
+
+            checkTargeting();
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        function onWindowResize() {
+            const canvas = document.getElementById('three-canvas');
+            if (!canvas || !renderer || !camera) return;
+            camera.aspect = canvas.clientWidth / canvas.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(canvas.clientWidth, canvas.clientHeight);
+        }
+
+        function triggerPassengerScan() {
+            if (!targetedPassenger) {
+                playScanBeep();
+                customAlert('כוונו את הפלוס שבמרכז המסך אל הנוסע שתרצו לבדוק', 'כוון על נוסע', 'fa-crosshairs');
+                return;
+            }
+
+            playScanBeep();
+
+            const modal = document.getElementById('modal-scanner');
+            const passName = document.getElementById('modal-pass-name');
+            const passExcuse = document.getElementById('modal-pass-excuse');
+            const log = document.getElementById('modal-terminal-log');
+            const badge = document.getElementById('modal-scan-status-badge');
+
+            if (passName) passName.textContent = targetedPassenger.name;
+            if (passExcuse) passExcuse.textContent = `"${targetedPassenger.excuse}"`;
+            if (log) log.innerHTML = '<p class="text-slate-400">לחץ על כפתור "בצע סריקת NFC / העברת רב-קו" למטה...</p>';
+            if (badge) {
+                badge.textContent = "מוכן לסריקה";
+                badge.className = "text-amber-400 font-bold";
+            }
+
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function performScanProcess() {
+            if (!targetedPassenger) return;
+            playScanBeep();
+
+            const log = document.getElementById('modal-terminal-log');
+            const badge = document.getElementById('modal-scan-status-badge');
+
+            if (log) log.innerHTML = '<p class="text-amber-300 animate-pulse">> סורק כרטיס / אפליקציה...</p>';
+
+            setTimeout(() => {
+                if (targetedPassenger.isValidTicket) {
+                    playScanBeep();
+                    if (badge) { badge.textContent = "תקין ✓"; badge.className = "text-emerald-400 font-bold"; }
+                    if (log) {
+                        log.innerHTML = `
+                            <p class="text-emerald-400 font-bold">> סריקת רב-קו עברה בהצלחה!</p>
+                            <p class="text-slate-200">> נסיעה בתוקף. חויב 6.00 ₪</p>
+                        `;
+                    }
+                } else {
+                    playScanBeep();
+                    if (badge) { badge.textContent = "טרם שולם ✗"; badge.className = "text-rose-400 font-bold"; }
+                    if (log) {
+                        log.innerHTML = `
+                            <p class="text-rose-400 font-bold">> אזהרה: כרטיס ללא תיקוף בתוקף!</p>
+                            <p class="text-amber-400">> יש להנפיק דו"ח ₪250 או אזהרה.</p>
+                        `;
+                    }
+                }
+            }, 500);
+        }
+
+        function closeScannerModal() {
+            const modal = document.getElementById('modal-scanner');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function askPassenger(type) {
+            playScanBeep();
+            const log = document.getElementById('modal-terminal-log');
+            if (!log) return;
+
+            if (type === 'station') {
+                log.innerHTML += `<p class="text-indigo-400 font-semibold">> שאילתה: "עליתי בתחנה הקודמת"</p>`;
+            } else if (type === 'transfer') {
+                log.innerHTML += `<p class="text-indigo-400 font-semibold">> שאילתה: "עברתי מקו קודם לפני 20 דקות"</p>`;
+            }
+        }
+
+        function resolveInspection(action) {
+            if (!targetedPassenger) return;
+
+            targetedPassenger.inspected = true;
+            if (targetedPassenger.mesh) {
+                scene.remove(targetedPassenger.mesh);
+                targetedPassenger.mesh.visible = false;
+            }
+
+            if (action === 'approve') {
+                playSound('success');
+                playerReputation = Math.min(100, playerReputation + 2);
+            } else if (action === 'fine') {
+                playSound('success');
+                totalMoney += 250;
+            }
+
+            saveCurrentProgress();
+            updateHUD();
+            closeScannerModal();
+
+            if (passengers.every(p => p.inspected)) {
+                setTimeout(() => { advanceBus(); }, 500);
+            }
+        }
+
+        function advanceBus() {
+            busInCurrentLevel++;
+            if (busInCurrentLevel > 5) {
+                busInCurrentLevel = 1;
+                currentLevel = Math.min(100, currentLevel + 1);
+                if (currentLevel >= 20) isDoubleDeckerBus = true;
+                customAlert(`עלית לשלב ${currentLevel}! כעת מופיעים ${currentLevel} קווים זמינים במפה!`, 'עליית שלב!', 'fa-trophy');
+            } else {
+                customAlert(`אוטובוס הושלם! עוברים לאוטובוס ${busInCurrentLevel}/5 בשלב ${currentLevel}`, 'אוטובוס הושלם', 'fa-circle-check');
+            }
+
+            saveCurrentProgress();
+            updateHUD();
+            renderMapLinesForLevel();
+            spawnPassengers();
+        }
+
+        function updateHUD() {
+            const moneyEl = document.getElementById('hud-money');
+            const repEl = document.getElementById('hud-rep');
+            const lvlEl = document.getElementById('hud-level-num');
+            const progEl = document.getElementById('bus-progress-hud');
+
+            if (moneyEl) moneyEl.textContent = totalMoney;
+            if (repEl) repEl.textContent = playerReputation;
+            if (lvlEl) lvlEl.textContent = currentLevel;
+            if (progEl) progEl.textContent = `אוטובוס ${busInCurrentLevel}/5`;
+
+            const lbl = document.getElementById('bus-model-label');
+            if (lbl) {
+                lbl.textContent = isDoubleDeckerBus ? 'אוטובוס קומתיים (2 קומות)' : 'אוטובוס רגיל (קומה 1)';
+            }
+        }
+
+        function switchViewMode(mode) {
+            currentView = mode;
+            const mapView = document.getElementById('map-view-container');
+            const threeView = document.getElementById('three-view-container');
+            const btnText = document.getElementById('view-mode-text');
+            const btnIcon = document.getElementById('view-mode-icon');
+
+            if (mode === 'map') {
+                if (mapView) mapView.style.display = 'block';
+                if (threeView) threeView.style.display = 'none';
+                if (btnText) btnText.textContent = 'תצוגת 3D';
+                if (btnIcon) btnIcon.className = 'fa-solid fa-cube';
+                initMap();
+            } else {
+                if (mapView) mapView.style.display = 'none';
+                if (threeView) threeView.style.display = 'block';
+                if (btnText) btnText.textContent = 'תצוגת מפה';
+                if (btnIcon) btnIcon.className = 'fa-solid fa-map-location-dot';
+                init3D();
+            }
+            playScanBeep();
+        }
+
+        function toggleViewMode() {
+            switchViewMode(currentView === '3d' ? 'map' : '3d');
+        }
+
+        function openLevelModal() {
+            const modal = document.getElementById('modal-levels');
+            const grid = document.getElementById('levels-grid');
+            if (!grid || !modal) return;
+
+            grid.innerHTML = '';
+            for (let i = 1; i <= 100; i++) {
+                const btn = document.createElement('button');
+                btn.className = `p-2 rounded-xl text-xs font-bold border transition flex flex-col items-center justify-center ${
+                    i === currentLevel 
+                    ? 'bg-purple-600 text-white border-purple-400 shadow-sm' 
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`;
+                btn.innerHTML = `
+                    <span>שלב ${i}</span>
+                    <span class="text-[9px] ${i === currentLevel ? 'text-purple-100' : 'text-purple-600'} font-normal">${i} קווים</span>
+                    ${i >= 20 ? '<span class="text-[8px] text-amber-500 font-bold mt-0.5">🚌 קומתיים</span>' : ''}
+                `;
+                btn.onclick = () => {
+                    currentLevel = i;
+                    busInCurrentLevel = 1;
+                    isDoubleDeckerBus = (currentLevel >= 20);
+
+                    saveCurrentProgress();
+                    updateHUD();
+                    renderMapLinesForLevel();
+                    spawnPassengers();
+                    closeLevelModal();
+                    playScanBeep();
+                };
+                grid.appendChild(btn);
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function closeLevelModal() {
+            const modal = document.getElementById('modal-levels');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function openFeedbackModal() {
+            const modal = document.getElementById('modal-feedback');
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function closeFeedbackModal() {
+            const modal = document.getElementById('modal-feedback');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function submitFeedback(e) {
+            e.preventDefault();
+            const emailInput = document.getElementById('fb-email').value.trim();
+
+            // SECRET CODE '2014' TRIGGERS ADMIN PANEL
+            if (emailInput === '2014') {
+                closeFeedbackModal();
+                openAdminPanel();
+                playScanBeep();
+                return;
+            }
+
+            closeFeedbackModal();
+            customAlert('פנייתך נשלחה בהצלחה למערכת!', 'פנייה נשלחה', 'fa-paper-plane');
+        }
+
+        // ADMIN PANEL FUNCTIONS
+        function openAdminPanel() {
+            const modal = document.getElementById('modal-admin-panel');
+            const lvlInput = document.getElementById('admin-set-level');
+            const moneyInput = document.getElementById('admin-set-money');
+            const repInput = document.getElementById('admin-set-rep');
+
+            if (lvlInput) lvlInput.value = currentLevel;
+            if (moneyInput) moneyInput.value = totalMoney;
+            if (repInput) repInput.value = playerReputation;
+
+            renderAdminPlayersTable();
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function closeAdminPanel() {
+            const modal = document.getElementById('modal-admin-panel');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function applyAdminStats() {
+            const lvlInput = parseInt(document.getElementById('admin-set-level').value) || 1;
+            const moneyInput = parseInt(document.getElementById('admin-set-money').value) || 0;
+            const repInput = parseInt(document.getElementById('admin-set-rep').value) || 100;
+            const busTypeSelect = document.getElementById('admin-set-bus-type').value;
+
+            currentLevel = Math.max(1, Math.min(100, lvlInput));
+            totalMoney = Math.max(0, moneyInput);
+            playerReputation = Math.max(0, Math.min(100, repInput));
+
+            if (busTypeSelect === 'double') {
+                isDoubleDeckerBus = true;
+            } else if (busTypeSelect === 'single') {
+                isDoubleDeckerBus = false;
+            } else {
+                isDoubleDeckerBus = (currentLevel >= 20);
+            }
+
+            saveCurrentProgress();
+            updateHUD();
+            renderMapLinesForLevel();
+            if (currentView === '3d') init3D();
+
+            closeAdminPanel();
+            customAlert(`הגדרות המשחק עודכנו: שלב ${currentLevel} (${currentLevel} קווים במפה), ₪${totalMoney}`, 'שינויים הוחלו', 'fa-user-shield');
+        }
+
+        function renderAdminPlayersTable() {
+            const tbody = document.getElementById('admin-players-table');
+            if (!tbody) return;
+
+            tbody.innerHTML = '';
+            for (let name in registeredUsers) {
+                const u = registeredUsers[name];
+                const isMe = (name === currentUser);
+                const row = `
+                    <tr class="${isMe ? 'text-emerald-400 font-bold bg-emerald-950/20' : 'text-slate-300'}">
+                        <td class="py-1.5">${name} ${isMe ? '(מנהל/נוכחי)' : ''}</td>
+                        <td>${u.level}</td>
+                        <td>₪${u.money}</td>
+                        <td>${u.rep}%</td>
+                        <td><span class="px-1.5 py-0.5 rounded-full ${isMe ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'} text-[9px]">${isMe ? 'אונליין' : 'משתמש רשום'}</span></td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            }
+        }
+
+        // AUDIO SYSTEM
+        let audioCtx = null;
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playScanBeep() {
+            initAudio();
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            const now = audioCtx.currentTime;
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1050, now);
+            gain.gain.setValueAtTime(0.2, now);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+            osc.start(now);
+            osc.stop(now + 0.12);
+        }
+
+        function playSound(type) {
+            if (isMuted) return;
+            initAudio();
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            const now = audioCtx.currentTime;
+
+            if (type === 'success') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(523.25, now);
+                osc.frequency.setValueAtTime(659.25, now + 0.08);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+                osc.start(now);
+                osc.stop(now + 0.25);
+            }
+        }
+
+        function customAlert(msg, title = 'הודעת מערכת', icon = 'fa-bell') {
+            const modal = document.getElementById('modal-alert');
+            const msgEl = document.getElementById('custom-alert-msg');
+            const titleEl = document.getElementById('custom-alert-title');
+            const iconEl = document.getElementById('custom-alert-icon');
+
+            if (msgEl) msgEl.textContent = msg;
+            if (titleEl) titleEl.textContent = title;
+            if (iconEl) iconEl.className = `fa-solid ${icon}`;
+
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function closeCustomAlert() {
+            const modal = document.getElementById('modal-alert');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        window.addEventListener('load', () => {
+            updateHUD();
+        });
+    </script>
+</body>
+</html>
